@@ -26,7 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/profile")
-@CrossOrigin(origins = "http://localhost:3000")
+@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:5173"})
 @RequiredArgsConstructor
 @Slf4j
 public class ProfileController {
@@ -75,6 +75,9 @@ public class ProfileController {
 	private ResponseEntity<byte[]> toImageResponse(ProfilePhotoContent content) {
 		return ResponseEntity.ok()
 				.header(HttpHeaders.CONTENT_TYPE, content.contentType())
+				.header(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, must-revalidate")
+				.header(HttpHeaders.PRAGMA, "no-cache")
+				.header(HttpHeaders.EXPIRES, "0")
 				.body(content.data());
 	}
 

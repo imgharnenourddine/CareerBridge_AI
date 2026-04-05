@@ -57,6 +57,11 @@ public class MessageService {
 				.collect(Collectors.toList());
 	}
 
+	@Transactional(readOnly = true)
+	public boolean hasMessagesForContext(Long userId, String context) {
+		return !getMessages(userId, context).isEmpty();
+	}
+
 	private String toBodyJson(String sender, String type, String content) {
 		try {
 			return objectMapper.createObjectNode()

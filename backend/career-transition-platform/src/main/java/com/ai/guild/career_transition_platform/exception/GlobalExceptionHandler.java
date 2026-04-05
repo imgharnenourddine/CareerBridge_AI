@@ -1,5 +1,6 @@
 package com.ai.guild.career_transition_platform.exception;
 
+import jakarta.persistence.EntityNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -50,5 +51,20 @@ public class GlobalExceptionHandler {
 	public ResponseEntity<Map<String, String>> handleInvalidPassword(InvalidPasswordException ex) {
 		return ResponseEntity.status(HttpStatus.BAD_REQUEST)
 				.body(Map.of("error", ex.getMessage()));
+	}
+
+	@ExceptionHandler(EntityNotFoundException.class)
+	public ResponseEntity<Map<String, String>> handleEntityNotFound(EntityNotFoundException ex) {
+		log.warn("Entity not found: {}", ex.getMessage());
+		return ResponseEntity.status(HttpStatus.NOT_FOUND)
+				.body(Map.of("error", ex.getMessage() != null ? ex.getMessage() : "Not found"));
+	}
+
+	@ExceptionHandler(Exception.class)
+	public ResponseEntity<Map<String, String>> handleGeneric(Exception ex) {
+		log.error("Unhandled error", ex);
+		String message = ex.getMessage() != null ? ex.getMessage() : "Internal server error";
+		return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+				.body(Map.of("error", message));
 	}
 }

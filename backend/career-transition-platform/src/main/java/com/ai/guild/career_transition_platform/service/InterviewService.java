@@ -1,5 +1,6 @@
 package com.ai.guild.career_transition_platform.service;
 
+import com.ai.guild.career_transition_platform.dto.InterviewCurrentResponse;
 import com.ai.guild.career_transition_platform.dto.InterviewRespondResponse;
 import com.ai.guild.career_transition_platform.dto.InterviewStartResponse;
 import com.ai.guild.career_transition_platform.entity.Interview;
@@ -14,7 +15,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -55,8 +56,6 @@ public class InterviewService {
 			- NEVER ask more than 7 questions.
 			- Keep all responses SHORT and conversational — this is a voice interview, not a written report.
 			- Always respond in the same language the user speaks.""";
-
-	private static final String START_USER_PROMPT = "Begin the interview now with your introduction and your first question.";
 
 	private static final String SKILL_ANALYSIS_USER_PROMPT_TEMPLATE = """
 			Based on the following interview transcript (JSON array of {role, content} with roles user and assistant), output ONE JSON object ONLY, no markdown fences, with this exact structure:
@@ -86,59 +85,32 @@ public class InterviewService {
 	@Transactional
 	public InterviewStartResponse startInterview(Long userId) {
 		User user = userRepository.findById(userId)
-				.orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
+				.orElseThrow(() -> new RuntimeException("User not found"));
 
-		Interview interview = Interview.builder()
-				.user(user)
-				.transcript("[]")
-				.startedAt(LocalDateTime.now())
-				.build();
-		interview = interviewRepository.save(interview);
-		log.info("Interview started: userId={} interviewId={}", userId, interview.getId());
+		Optional<Interview> existingIncomplete = interviewRepository
+				.findFirstByUser_IdAndCompletedAtIsNullOrderByCreatedAtDesc(userId);
 
-		List<ChatMessage> messages = new ArrayList<>();
-		messages.add(SystemMessage.from(INTERVIEW_SYSTEM_PROMPT));
-		messages.add(UserMessage.from(START_USER_PROMPT));
-
-		ChatResponse response = mistralChatModel.chat(messages);
-		String intro = response.aiMessage().text();
-		if (intro == null) {
-			intro = "";
-		}
-		TokenUsage tu = response.tokenUsage();
-		if (tu != null) {
-			log.debug("Mistral token usage (start): {}", tu);
-		}
-		log.debug("Introduction text length={}", intro != null ? intro.length() : 0);
-
-		ArrayNode arr = objectMapper.createArrayNode();
-		arr.add(objectMapper.createObjectNode().put("role", "assistant").put("content", intro));
-		String transcriptJson;
-		try {
-			transcriptJson = objectMapper.writeValueAsString(arr);
-		} catch (JsonProcessingException e) {
-			throw new IllegalStateException("Failed to serialize transcript", e);
-		}
-		interview.setTranscript(transcriptJson);
-		interviewRepository.save(interview);
-		log.debug("Transcript serialized after start, length={}", transcriptJson.length());
-
-		String ctx = interviewContext(interview.getId());
-		messageService.saveMessage(userId, ctx, SENDER_BOT, intro, TYPE_TEXT);
-
-		SpeechService.SpeechAudio tts = speechService.synthesize(intro);
-		byte[] audio = tts != null ? tts.audioBytes() : null;
-		String audioCt = tts != null ? tts.contentType() : null;
-		if (tts == null) {
-			log.warn("TTS failed at interview start; client should use Web Speech API");
+		Interview interview;
+		if (existingIncomplete.isPresent()) {
+			interview = existingIncomplete.get();
+			log.info("Resuming existing incomplete interview id={} for userId={}", interview.getId(), userId);
+		} else {
+			interview = Interview.builder()
+					.user(user)
+					.transcript("[]")
+					.startedAt(LocalDateTime.now())
+					.build();
+			interview = interviewRepository.save(interview);
+			log.info("Created new interview id={} for userId={}", interview.getId(), userId);
 		}
 
-		log.info("Interview start completed: interviewId={} introductionLength={}", interview.getId(), intro.length());
+		String intro = "Welcome to The Forge Guild. I am your AI career advisor. Let's begin your interview.";
+
 		return InterviewStartResponse.builder()
 				.interviewId(interview.getId())
 				.introductionText(intro)
-				.audioBytes(audio)
-				.audioContentType(audioCt)
+				.audioBytes(null)
+				.audioContentType(null)
 				.build();
 	}
 
@@ -385,7 +357,15 @@ public class InterviewService {
 	}
 
 	@Transactional(readOnly = true)
-	public Interview getCurrentIncompleteInterview(Long userId) {
-		return interviewRepository.findFirstByUser_IdAndCompletedAtIsNullOrderByStartedAtDesc(userId).orElse(null);
+	public InterviewCurrentResponse getCurrentInterview(Long userId) {
+		Optional<Interview> latest = interviewRepository.findFirstByUser_IdOrderByCreatedAtDesc(userId);
+		if (latest.isPresent()) {
+			return InterviewCurrentResponse.builder()
+					.interviewId(latest.get().getId())
+					.build();
+		}
+		return InterviewCurrentResponse.builder()
+				.interviewId(null)
+				.build();
 	}
 }

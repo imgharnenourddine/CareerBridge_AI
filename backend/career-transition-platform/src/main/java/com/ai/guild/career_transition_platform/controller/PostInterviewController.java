@@ -29,7 +29,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "http://localhost:3000")
+@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:5173"})
 @RequiredArgsConstructor
 @Slf4j
 public class PostInterviewController {
@@ -43,8 +43,10 @@ public class PostInterviewController {
 	public ResponseEntity<PostInterviewResponse> start(@RequestBody PostInterviewStartRequest request) {
 		User user = currentUser();
 		Long interviewId = request.getInterviewId();
-		log.info("POST /api/post-interview/start email={} interviewId={}", user.getEmail(), interviewId);
+		log.info("POST /api/post-interview/start: body accepted interviewId={} userEmail={}", interviewId, user.getEmail());
 		PostInterviewResponse body = postInterviewService.startPostInterviewFlow(user.getId(), interviewId);
+		log.info("POST /api/post-interview/start: success interviewId={} responseType={} messagePreview={}", interviewId,
+				body.getType(), body.getMessage() != null ? body.getMessage().substring(0, Math.min(80, body.getMessage().length())) : "");
 		return ResponseEntity.status(HttpStatus.CREATED).body(body);
 	}
 

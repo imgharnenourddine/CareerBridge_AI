@@ -1,397 +1,140 @@
-# CareerBridge AI — Project context (backend + repo layout)
+# CareerBridge AI — contexte projet (état au 2026-04-04)
 
-This document is the **single reference** for resuming work on **CareerBridge AI**.  
-**Active backend module:** `backend/career-transition-platform` (Spring Boot **3.5.13**, Java **17**).  
-**Frontend:** described in `readme.md` at repo root — **not present in this repository** as application code.
-
-**Package base (Java):** `com.ai.guild.career_transition_platform`
+Document de synthèse pour les assistants et développeurs : structure réelle du dépôt, stack, flux métier et configuration. Complète le `readme.md` (vision produit) par l’état technique actuel.
 
 ---
 
-## 1. Repository layout (root)
+## 1. Vue d’ensemble
 
-```
-CareerBridge AI/
-├── .gitignore                 # ignores .env and **/.env
-├── .env                       # local secrets (not committed)
-├── .env.example               # template / hints for env vars (do not commit real secrets)
-├── CONTEXT.md                 # this file
-├── readme.md                  # product vision, features, target stack
-├── .vscode/
-│   └── settings.json
-└── backend/
-    └── career-transition-platform/
-        ├── pom.xml
-        ├── mvnw, mvnw.cmd
-        ├── .mvn/
-        ├── .env                 # optional; spring-dotenv may load from module dir (${user.dir})
-        └── src/
-            ├── main/
-            │   ├── java/com/ai/guild/career_transition_platform/
-            │   │   ├── CareerTransitionPlatformApplication.java
-            │   │   ├── config/          # LangChain4jConfig, MinioConfig, OkHttpClientConfig
-            │   │   ├── controller/      # Auth, Profile, Interview, PostInterview
-            │   │   ├── dto/
-            │   │   ├── entity/
-            │   │   ├── enums/
-            │   │   ├── exception/
-            │   │   ├── repository/
-            │   │   ├── security/
-            │   │   └── service/
-            │   └── resources/
-            │       └── application.properties
-            └── test/
-                ├── java/.../CareerTransitionPlatformApplicationTests.java
-                └── resources/application.properties
-```
-
-**Build output:** `backend/career-transition-platform/target/` (do not version).
+- **Nom / concept** : plateforme de transition de carrière assistée par IA (« Future Skills Guild » / The Forge Guild), pour travailleurs impactés par l’automatisation.
+- **Code dans le dépôt** :
+  - **Backend** : Spring Boot dans `backend/career-transition-platform/`.
+  - **Frontend** : application **React 19** + **Vite 8** dans `frontend/` (`package.json`, sources sous `frontend/src/`). Client HTTP **axios** vers `http://localhost:8080`, JWT stocké en `localStorage` (`careerbridge_token` / `careerbridge_user`).
+- **Racine du dépôt** : fichiers HTML statiques hérités ou maquettes (`index.html`, `dashboard.html`, `registre.html`, `interview.html`, images `*.jpg` / `*.png`) — le parcours applicatif principal cible le **frontend Vite**.
+- **Package Java** : `com.ai.guild.career_transition_platform` (le nom Maven avec tirets n’est pas valide en Java ; voir `HELP.md`).
 
 ---
 
-## 2. Entities (JPA)
+## 2. Frontend — stack et structure
 
-| Entity | Table | Attributes | Relationships |
-|--------|--------|------------|----------------|
-| **User** | `users` | `id` (PK), `email` (unique), `passwordHash`, `firstName`, `lastName`, `imagePath` (nullable, MinIO object key), `role` (`Role`, default `USER`), `createdAt`, `updatedAt` | OneToMany: `Interview`, `Recommendation`, `Formation`, `Candidature`, `Message` (all mapped by `user`, cascade ALL, orphanRemoval where defined) |
-| **Interview** | `interviews` | `id`, `transcript` (TEXT, JSON array of `{role, content}`), `skillAnalysis` (TEXT, JSON from Mistral), `startedAt`, `completedAt`, `createdAt`, `updatedAt` | ManyToOne `User`; OneToMany `Recommendation` (cascade ALL, orphanRemoval) |
-| **Recommendation** | `recommendations` | `id`, `sector`, `jobTitle`, `description` (TEXT), `rankOrder`, `createdAt`, `updatedAt` | ManyToOne `User`, `Interview` (required); OneToMany `Formation` |
-| **Formation** | `formations` | `id`, `sector`, `title`, `description` (TEXT), `selectedAt`, `createdAt`, `updatedAt` | ManyToOne `User` (required); ManyToOne `Recommendation` (nullable FK) |
-| **Candidature** | `candidatures` | `id`, `companyName`, `jobTitle`, `status` (`CandidatureStatus`, default `PENDING`), `responseMessage` (TEXT), `appliedAt`, `updatedAt` | ManyToOne `User` (required) |
-| **Message** | `messages` | `id`, `context` (String, max 100), `orderIndex`, `body` (TEXT), `createdAt` | ManyToOne `User` (required) |
+| Élément | Détail |
+|--------|--------|
+| Build | Vite **8**, plugin `@vitejs/plugin-react` |
+| UI | **React 19**, **React Router 7**, **Tailwind CSS 4** (`index.css`, PostCSS) |
+| Icônes | `lucide-react` |
+| État auth | `AuthContext` (reducer + `localStorage`) — la dépendance **zustand** est listée dans `package.json` mais **non utilisée** dans le code actuel |
+| API | `src/api/api.js` : instance axios, intercepteur Bearer + redirection `/login` sur 401 |
 
-**Enums**
+**Routes** (`App.jsx`) :
 
-- `Role`: `USER`, `ADMIN`
-- `CandidatureStatus`: `PENDING`, `ACCEPTED`, `REJECTED`
+| Chemin | Comportement |
+|--------|----------------|
+| `/` | `HomePage` (landing marketing) |
+| `/login`, `/register` | `PublicOnlyRoute` — redirige vers `/dashboard` si déjà connecté |
+| `/dashboard`, `/interview`, `/messages` | `ProtectedRoute` — JWT requis |
+| `*` | redirection vers `/` |
 
-**Message `body` encoding (important):** the app does **not** use separate DB columns for sender/type. `MessageService` stores JSON in `body`:
+**Pages** :
 
-```json
-{"sender":"USER|BOT","type":"TEXT|...","content":"<payload string>"}
-```
+- **HomePage** : landing (assets dans `src/assets/`, dont `download.png`, `robot.png`, etc.).
+- **LoginPage / RegisterPage** : formulaires branchés sur l’API auth.
+- **DashboardPage** : profil (GET/PUT), photo (upload + blob GET), mot de passe, agrégation **GET `/api/dashboard/stats`**, entretien courant, aperçu des messages post-entretien (`/api/post-interview/{id}/messages`).
+- **InterviewPage** : démarrage entretien, réponses multipart (audio/texte), lecture TTS (octets audio ou Web Speech), complétion via `POST /api/interview/{id}/complete`, reconnaissance vocale navigateur en secours si le serveur renvoie `browserSttRequired`.
+- **Messages** (`/messages`) : placeholder dans `App.jsx` (pas encore d’écran dédié).
 
-`content` may itself be a JSON string (e.g. Mistral post-interview assistant JSON, or candidature UI payload).
+**Port et CORS** : le backend n’autorise que **`http://localhost:3000`**. Vite utilise par défaut le port **5173**. Pour le dev local sans toucher au backend : lancer le front avec le port 3000, par exemple :
 
-**Message `context` conventions (string keys, not enums)**
+`npm run dev -- --port 3000`
 
-| Pattern | Usage |
-|---------|--------|
-| `INTERVIEW_{interviewId}` | Interview chat thread for that interview |
-| `ANALYSIS_{interviewId}` | Skill analysis summary message after `completeInterview` |
-| `POST_INTERVIEW_{interviewId}` | Post-interview guided flow messages |
-| `CANDIDATURE` | In-app notifications for candidature ACCEPTED/REJECTED (`EmailService`) |
-
----
-
-## 3. Repositories
-
-All extend `JpaRepository<Entity, Long>` unless noted.
-
-| Repository | Methods |
-|------------|---------|
-| **UserRepository** | `findByEmail(String)`, `existsByEmail(String)` |
-| **InterviewRepository** | `findByUser_IdOrderByCreatedAtDesc(Long)`, `findFirstByUser_IdAndCompletedAtIsNotNullOrderByCompletedAtDesc(Long)`, `findFirstByUser_IdAndCompletedAtIsNullOrderByStartedAtDesc(Long)`, `findByIdAndUser_Id(Long, Long)` |
-| **RecommendationRepository** | `findByUser_Id(Long)`, `findByInterview_Id(Long)`, `findByUser_IdOrderByRankOrderAsc(Long)` |
-| **FormationRepository** | `findByUser_Id(Long)`, `findByRecommendation_Id(Long)` |
-| **CandidatureRepository** | `findByUser_Id(Long)`, `findByUser_IdAndStatus(Long, CandidatureStatus)` |
-| **MessageRepository** | `findByUser_IdAndContextOrderByOrderIndexAsc(Long, String)`; `@Query` `findMaxOrderIndexByUserIdAndContext` → `COALESCE(MAX(orderIndex), -1)` |
+(depuis `frontend/`).
 
 ---
 
-## 4. Services
+## 3. Backend — stack et versions
 
-### AuthService
+| Élément | Détail |
+|--------|--------|
+| Framework | Spring Boot **3.5.13** |
+| Java | **17** |
+| Build | Maven (`pom.xml`) |
+| API | REST, port **8080** (`server.port`) |
+| Persistance | Spring Data JPA, Hibernate `ddl-auto=update`, **PostgreSQL** |
+| Sécurité | Spring Security, sessions **stateless**, **JWT** (jjwt 0.12.5), mot de passe BCrypt |
+| IA | **LangChain4j** 1.12.2 + **Mistral AI** (`MistralAiChatModel`, modèle `MISTRAL_SMALL_LATEST`) |
+| Fichiers | **MinIO** 8.5.7 (photos de profil, bucket configurable) |
+| Config locale | **spring-dotenv** — chargement d’un `.env` (répertoire par défaut `${user.dir}`, souvent le module Maven) |
+| Tests | `CareerTransitionPlatformApplicationTests` (smoke test) ; H2 en scope test |
 
-| Method | Description |
-|--------|-------------|
-| `register(RegisterRequest)` | Ensures email unique; BCrypt password; role `USER`; loads `UserDetails`, returns `AuthResponse` with JWT. Throws `EmailAlreadyExistsException` if email exists. |
-| `login(LoginRequest)` | `AuthenticationManager` with email/password; on success loads `User`, JWT via `JwtService`; throws `BadCredentialsException` on failure. |
-
-### ProfileService
-
-| Method | Description |
-|--------|-------------|
-| `getProfile(Long userId)` | Maps `User` → `ProfileResponse`. |
-| `updateProfile(Long, UpdateProfileRequest)` | Updates first/last name. |
-| `changePassword(Long, ChangePasswordRequest)` | Verifies current password; throws `InvalidPasswordException` if mismatch. |
-| `uploadProfilePhoto(Long, MultipartFile)` | Stores object in MinIO `profile_{userId}_{timestamp}.{ext}`; removes previous object if any. |
-| `getProfilePhoto(Long userId)` | `Optional<ProfilePhotoContent>` (`record`: `byte[] data`, `String contentType`). |
-
-### MessageService
-
-| Method | Description |
-|--------|-------------|
-| `saveMessage(Long userId, String context, String sender, String content, String type)` | Next `orderIndex` via `findMaxOrderIndexByUserIdAndContext`; persists wrapped JSON in `body`. |
-| `getMessages(Long userId, String context)` | Ordered by `orderIndex` ASC. |
-| `getMessagesAsDto(...)` | Same, mapped to `MessageDto` (parses inner JSON for sender/type/content). |
-
-### SpeechService
-
-| Method | Description |
-|--------|-------------|
-| `transcribe(byte[] audioBytes, String filename, String contentType)` | **STT chain:** Groq Whisper (`whisper-large-v3`) → AssemblyAI upload/poll → `null` (signal browser Web Speech API). |
-| `synthesize(String text)` | **TTS chain:** ElevenLabs → Unreal Speech stream → `null` (browser TTS). Returns `SpeechAudio` record (`audioBytes`, `contentType`) or null. |
-
-### InterviewService
-
-Constants: `SENDER_USER`, `SENDER_BOT`, `TYPE_TEXT`.
-
-| Method | Description |
-|--------|-------------|
-| `startInterview(Long userId)` | Creates `Interview` with `transcript="[]"`, `startedAt=now`; Mistral intro + first question; persists transcript JSON; saves BOT message under `INTERVIEW_{id}`; TTS for intro → `InterviewStartResponse`. |
-| `respondToInterview(Long userId, Long interviewId, String userTranscribedText)` | Loads interview; builds LangChain4j messages from transcript + system prompt; appends user turn; Mistral reply; updates transcript; may set `completedAt` if ≥7 user turns or closing phrase; saves USER+BOT messages; TTS → `InterviewRespondResponse` (`isCompleted`, `browserSttRequired`). |
-| `completeInterview(Long userId, Long interviewId)` | Requires `completedAt` set; Mistral produces skill-analysis JSON; saves `skillAnalysis`; replaces recommendations for interview; saves message under `ANALYSIS_{id}`. |
-| `getCurrentIncompleteInterview(Long userId)` | Latest interview with `completedAt == null`, or `null`. |
-
-### EmailService
-
-| Method | Description |
-|--------|-------------|
-| `sendFormationInscriptionEmail(...)` | SMTP to fixed notification inbox; subject `[CareerBridge] Inscription Formation — {title}`; body includes simulated formation account password `CBG_XXXXXX`. |
-| `sendCandidatureEmail(Long userId, ...)` | Creates `Candidature` **PENDING**; SMTP with instructions; returns `candidatureId`. |
-| `startImapPolling()` | `@Scheduled(fixedDelay = 30000)`; if `mail.imap.polling.enabled` true: IMAP unread + subject contains `[CareerBridge-Response]`; parses `ACCEPTED_{id}` / `REJECTED_{id}`; calls `self.processCandidatureResponse` (lazy self for `@Transactional`). |
-| `processCandidatureResponse(Long candidatureId, String status)` | Updates status; saves `Message` under context `CANDIDATURE` with JSON content for ACCEPTED vs REJECTED. |
-
-### PostInterviewService
-
-| Method | Description |
-|--------|-------------|
-| `startPostInterviewFlow(Long userId, Long interviewId)` | Requires completed interview + non-empty `skillAnalysis`; loads recommendations; Mistral JSON assistant message; saves under `POST_INTERVIEW_{id}`; returns `PostInterviewResponse`. |
-| `processUserChoice(...)` | Saves USER message; branches on `context` string (e.g. `ANALYSIS_RESPONSE`, `SECTOR_CHOICE`, `FORMATION_CHOICE`, `INSCRIPTION_CONFIRMED`, `APPLICATION_AI`, …); may call `EmailService`; saves BOT message; returns `PostInterviewResponse`. |
-| `postInterviewContext(Long interviewId)` | **static** → `"POST_INTERVIEW_" + interviewId`. |
+Fichiers sensibles : `.env` est ignoré par `.gitignore` (ne pas committer les secrets).
 
 ---
 
-## 5. Controllers and HTTP API
+## 4. Modèle de données (entités JPA)
 
-**Global:** Except auth, endpoints expect header `Authorization: Bearer <JWT>`.  
-**CORS:** `http://localhost:3000` on controllers + global `SecurityConfig` CORS.
+Entités repérées : **User**, **Interview**, **Message**, **Recommendation**, **Formation**, **Candidature**.
 
-### AuthController — `@RequestMapping("/api/auth")`
-
-| Method | Path | Request | Response | Status |
-|--------|------|---------|----------|--------|
-| POST | `/api/auth/register` | `RegisterRequest` JSON | `AuthResponse` | **201** |
-| POST | `/api/auth/login` | `LoginRequest` JSON | `AuthResponse` | **200** |
-
-### ProfileController — `@RequestMapping("/api/profile")`
-
-| Method | Path | Request | Response | Status |
-|--------|------|---------|----------|--------|
-| GET | `/api/profile` | — | `ProfileResponse` | **200** |
-| PUT | `/api/profile` | `UpdateProfileRequest` | `ProfileResponse` | **200** |
-| PUT | `/api/profile/password` | `ChangePasswordRequest` | empty | **200** |
-| POST | `/api/profile/photo` | multipart `file` | `ProfileResponse` | **200** |
-| GET | `/api/profile/photo` | — | raw image bytes + `Content-Type` | **200** or **404** |
-
-### InterviewController — `@RequestMapping("/api/interview")`
-
-| Method | Path | Request | Response | Status |
-|--------|------|---------|----------|--------|
-| POST | `/api/interview/start` | — | `InterviewStartResponse` | **201** |
-| POST | `/api/interview/{interviewId}/respond` | multipart: `audio` and/or `text` | `InterviewRespondResponse` | **200**; STT failure → `browserSttRequired=true`; missing audio+text → **400** (exception); read error → **500** |
-| GET | `/api/interview/{interviewId}/messages` | — | `List<MessageDto>` | **200** |
-| GET | `/api/interview/current` | — | `InterviewCurrentResponse` (nullable ids) | **200** |
-| POST | `/api/interview/{interviewId}/complete` | — | empty | **204** |
-
-### PostInterviewController — `@RequestMapping("/api")`
-
-| Method | Path | Request | Response | Status |
-|--------|------|---------|----------|--------|
-| POST | `/api/post-interview/start` | `PostInterviewStartRequest` | `PostInterviewResponse` | **201** |
-| POST | `/api/post-interview/choice` | `UserChoiceRequest` | `PostInterviewResponse` | **200** |
-| GET | `/api/post-interview/{interviewId}/messages` | — | `List<MessageDto>` | **200** |
-| POST | `/api/admin/candidature/respond` | `CandidatureResponseRequest` | empty | **200** if `Role.ADMIN`; **403** otherwise |
+- **User** : email unique, hash mot de passe, prénom/nom, chemin image (MinIO), **rôle** (`Role`, ex. USER / ADMIN pour l’endpoint admin).
+- **Interview** : transcript JSON, analyse de compétences, horodatages, lien utilisateur ; génération de **recommandations** et formations associées côté service.
+- **Message** : fil de discussion par **contexte** (ex. `INTERVIEW_{id}` vs flux post-entretien).
+- Les flux **Formation** / **Candidature** s’inscrivent dans la phase post-entretien (choix, simulation d’inscription, entreprises, réponses admin).
 
 ---
 
-## 6. DTOs (fields)
+## 5. API REST (aperçu)
 
-| DTO | Fields |
-|-----|--------|
-| **RegisterRequest** | `firstName`, `lastName`, `email`, `password` |
-| **LoginRequest** | `email`, `password` |
-| **AuthResponse** | `token`, `email`, `firstName`, `lastName`, `role` |
-| **ProfileResponse** | `id`, `email`, `firstName`, `lastName`, `imagePath` |
-| **UpdateProfileRequest** | `firstName`, `lastName` |
-| **ChangePasswordRequest** | `currentPassword`, `newPassword` |
-| **InterviewStartResponse** | `interviewId`, `introductionText`, `audioBytes`, `audioContentType` |
-| **InterviewRespondResponse** | `aiResponseText`, `audioBytes`, `audioContentType`, `isCompleted` (JSON name), `browserSttRequired` |
-| **InterviewCurrentResponse** | `interviewId`, `startedAt` |
-| **TranscribeRequest** | `interviewId` (optional helper DTO; not wired to a dedicated endpoint) |
-| **MessageDto** | `id`, `orderIndex`, `sender`, `type`, `content`, `createdAt` |
-| **PostInterviewResponse** | `message`, `options` (list), `type`, `data` (`JsonNode`) |
-| **PostInterviewStartRequest** | `interviewId` |
-| **UserChoiceRequest** | `interviewId`, `choice`, `context` |
-| **CandidatureResponseRequest** | `candidatureId`, `status` (`ACCEPTED` / `REJECTED`) |
+**Public (sans JWT)** — `SecurityConfig` :
+
+- `POST /api/auth/register`, `POST /api/auth/login`
+
+**Authentifié (Bearer JWT)** — tout le reste :
+
+- **Profil** (`/api/profile`) : GET/PUT profil, PUT mot de passe, POST photo (multipart), GET photo binaire.
+- **Tableau de bord** (`/api/dashboard`) : `GET /api/dashboard/stats` — statuts entretien / formation, compteurs candidatures, **rang Guild** (APPRENTI → MAITRE) et **guildProgressPercent** (logique dans `DashboardService`).
+- **Entretien** (`/api/interview`) : démarrage, réponse audio **ou** texte (multipart), messages liés à l’entretien, entretien courant, complétion.
+- **Post-entretien** (`/api`) : `POST /post-interview/start`, `POST /post-interview/choice`, `GET /post-interview/{interviewId}/messages`.
+- **Admin** : `POST /api/admin/candidature/respond` (rôle ADMIN — défini dans `PostInterviewController`, traite email / statut candidature).
+
+**CORS** : origine autorisée **`http://localhost:3000`**, credentials activés (aligné avec le frontend Vite si lancé sur ce port).
 
 ---
 
-## 7. Security and JWT
+## 6. Services externes (clés via `.env` / `application.properties`)
 
-### Classes
+| Domaine | Usage dans le code |
+|--------|---------------------|
+| **Mistral** | Chat entretien + post-entretien (JSON structuré pour l’UI guidée). |
+| **Groq** | Whisper — transcription audio (STT), prioritaire dans `SpeechService`. |
+| **AssemblyAI** | Fallback STT si Groq échoue. |
+| **ElevenLabs / Unreal Speech** | TTS côté backend (selon implémentation dans `SpeechService`). |
+| **PostgreSQL** | `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`. |
+| **MinIO** | `MINIO_*` — stockage objets (photos). |
+| **SMTP + IMAP Gmail** | envoi mail et polling (`MAIL_USERNAME` / `MAIL_PASSWORD`) — parcours candidatures / notifications. |
+| **JWT** | `JWT_SECRET` (HMAC, doc : ≥ 32 caractères). |
 
-- **SecurityConfig** — Stateless sessions, CSRF off, JWT filter before `UsernamePasswordAuthenticationFilter`; public: `OPTIONS /**`, `POST /api/auth/register`, `POST /api/auth/login`; all other requests **authenticated**. CORS bean: origin `http://localhost:3000`, methods including OPTIONS, all headers, credentials true.
-- **JwtService** — HS256 via `jjwt`; `jwt.secret` → `Keys.hmacShaKeyFor`; claims: subject = email, issuedAt, expiration from `jwt.expiration` (ms); `generateToken`, `extractUsername`, `isTokenValid` (subject match + expiry).
-- **JwtAuthFilter** — Reads `Authorization: Bearer <token>`; loads `UserDetails` by email; validates token; sets `SecurityContext` with `ROLE_<Role>`.
-- **UserDetailsServiceImpl** — Loads `User` by email; Spring `User` with `ROLE_USER` or `ROLE_ADMIN`.
-
-### JWT usage
-
-1. Login/register returns JWT in `AuthResponse.token`.
-2. Client sends `Authorization: Bearer <token>` on protected routes.
-3. Filter sets authentication; controllers use `SecurityContextHolder` + `UserRepository.findByEmail` for domain `User` where needed.
-
-**Note:** `UsernameNotFoundException` from controllers is **not** mapped in `GlobalExceptionHandler` (may surface as 500 unless Spring MVC handles it).
+Si la transcription serveur échoue, l’API peut renvoyer `browserSttRequired=true` pour basculer sur la **Web Speech API** côté navigateur.
 
 ---
 
-## 8. Config classes
+## 7. Fichiers de configuration importants
 
-| Class | Purpose |
-|-------|---------|
-| **LangChain4jConfig** | `@Bean ChatModel` — `MistralAiChatModel`, `MISTRAL_SMALL_LATEST`, `mistral.api-key`. |
-| **OkHttpClientConfig** | `@Bean OkHttpClient` — long timeouts for speech APIs. |
-| **MinioConfig** | `@Bean MinioClient`; `@Bean MinioBucketInitializer` — optional create bucket when `minio.verify-bucket-at-startup=true`. |
-
-**Scheduling:** `@EnableScheduling` on `CareerTransitionPlatformApplication` (IMAP polling).
+- `backend/career-transition-platform/src/main/resources/application.properties` — propriétés Spring (DB, JWT, mail, MinIO, clés API, logging DEBUG sur le package applicatif).
+- `backend/career-transition-platform/.env` — **non versionné** ; doit définir les variables attendues par les `${...}` du properties.
 
 ---
 
-## 9. Exceptions and handling
+## 8. État Git (instantané utile)
 
-| Exception | HTTP | Handler |
-|-----------|------|---------|
-| **InterviewNotFoundException** | 404 | `GlobalExceptionHandler` |
-| **CandidatureNotFoundException** | 404 | `CandidatureExceptionHandler` |
-| **EmailAlreadyExistsException** | 409 | `GlobalExceptionHandler` |
-| **BadCredentialsException** | 401 | `GlobalExceptionHandler` |
-| **InvalidPasswordException** | 400 | `GlobalExceptionHandler` |
-| **IllegalArgumentException** | 400 | `GlobalExceptionHandler` |
-| **IllegalStateException** | 400 | `GlobalExceptionHandler` |
-
-Other runtime exceptions (e.g. `EntityNotFoundException` from `ProfileService`) may not be mapped → default Spring error handling.
+À l’ouverture de session typique : `frontend/` et nouveaux fichiers racine (HTML, images) souvent **non suivis** ; `CONTEXT.md` et `application.properties` peuvent être modifiés ; backend avec ajouts récents (ex. `DashboardController` / `DashboardService`).
 
 ---
 
-## 10. `application.properties` keys (main)
+## 9. Pistes de travail rapides
 
-**Application:** `spring.application.name`, `server.port`
-
-**Dotenv:** `springdotenv.directory` (default `${user.dir}`)
-
-**JWT:** `jwt.secret`, `jwt.expiration`
-
-**AI / speech:** `mistral.api-key`, `groq.api-key`, `assemblyai.api-key`, `elevenlabs.api-key`, `elevenlabs.voice-id`, `unreal-speech.api-key`
-
-**Mail:** `spring.mail.host`, `spring.mail.port`, `spring.mail.username`, `spring.mail.password`, `spring.mail.properties.mail.smtp.auth`, `spring.mail.properties.mail.smtp.starttls.enable`, `mail.imap.host`, `mail.imap.port`, `mail.imap.username`, `mail.imap.password`, `mail.imap.polling.enabled`
-
-**MinIO:** `minio.url`, `minio.access-key`, `minio.secret-key`, `minio.bucket-name`, `minio.verify-bucket-at-startup`
-
-**Multipart:** `spring.servlet.multipart.max-file-size`, `max-request-size`
-
-**Datasource:** `spring.datasource.url`, `username`, `password`, `driver-class-name`
-
-**JPA:** `spring.jpa.hibernate.ddl-auto`, `show-sql`, `format_sql`, `open-in-view`, `hibernate.jdbc.time_zone`
-
-**Logging:** `logging.level.root`, `logging.level.com.ai.guild.career_transition_platform`, `logging.pattern.console`
+1. **Messages** : remplacer le placeholder `/messages` par un écran consommant `getPostInterviewMessages` (et flux post-entretien) comme prévu par le dashboard.
+2. **Port dev** : documenter ou automatiser le port 3000 (script npm ou proxy Vite) pour éviter les erreurs CORS avec la config actuelle.
+3. **Qualité** : étendre les tests (services, sécurité, contrôleurs) au-delà du test de chargement du contexte Spring.
+4. **Déploiement** : variables d’environnement pour prod (CORS, secrets, URL DB/MinIO).
 
 ---
 
-## 11. Environment variables (names only — no values)
-
-Set via OS env or `.env` (loaded by spring-dotenv from configured directory). **Do not commit real secrets.**
-
-| Variable | Used for |
-|----------|----------|
-| `SPRINGDOTENV_DIRECTORY` | Optional override for folder containing `.env` |
-| `JWT_SECRET` | HMAC key for JWT (must be sufficient length for HS256) |
-| `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | PostgreSQL |
-| `MISTRAL_API_KEY` | Mistral (LangChain4j) |
-| `GROQ_API_KEY` | Groq Whisper STT |
-| `ASSEMBLYAI_API_KEY` | AssemblyAI STT fallback |
-| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | ElevenLabs TTS |
-| `UNREAL_SPEECH_API_KEY` | Unreal Speech TTS fallback |
-| `MAIL_USERNAME`, `MAIL_PASSWORD` | Gmail SMTP + IMAP (use App Password for Gmail) |
-| `MINIO_URL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET_NAME` | MinIO |
-| `MINIO_VERIFY_BUCKET` | Optional boolean for bucket init |
-
-**Reminder:** keep `.env` out of git; rotate any key that was ever committed to `.env.example` by mistake.
-
----
-
-## 12. Maven dependencies (high level)
-
-- Spring Boot: Web, Data JPA, Security, Validation, Mail, Devtools, Test  
-- `me.paulschwarz:spring-dotenv:4.0.0`  
-- PostgreSQL (runtime), H2 (test)  
-- jjwt 0.12.5 (api, impl, jackson)  
-- MinIO 8.5.7  
-- LangChain4j 1.12.2 + langchain4j-mistral-ai  
-- OkHttp 4.12.0  
-- Lombok, spring-boot-configuration-processor  
-
-`jackson-databind` is provided transitively via `spring-boot-starter-web`.
-
----
-
-## 13. What is implemented vs remaining
-
-### Implemented (backend)
-
-- Auth (register/login, JWT), profile CRUD, password, MinIO profile photo  
-- Interview flow: Mistral voice interview, transcript JSON, TTS/STT chains, messages per interview, `completeInterview` skill analysis + recommendations + analysis message  
-- Post-interview JSON flow (`PostInterviewService`) + related endpoints  
-- Email: formation + candidature notifications; IMAP polling + admin REST fallback for candidature response  
-- `MessageService` inbox-style storage with context strings  
-- Global + candidature exception handlers for listed exceptions  
-- CORS for React dev origin  
-
-### Not in this repo / not done
-
-- **React frontend** (Web Speech API, UI, admin UI)  
-- **Strict Bean Validation** on DTOs (`@Valid` not used in controllers)  
-- **Dedicated REST** for formations list/create, candidature list, generic inbox aggregation (only context-based message reads exist)  
-- **CI/CD**, production hardening (CORS, secrets rotation, rate limits)  
-- **Integration tests** beyond `contextLoads`  
-- **Role-based security at URL level** for `/api/admin/*` (admin endpoint checks `Role` in controller only)
-
----
-
-## 14. Project conventions
-
-| Topic | Convention |
-|-------|------------|
-| **Package** | `com.ai.guild.career_transition_platform` |
-| **Layers** | Controller → Service → Repository; entities not exposed directly in API (DTOs) |
-| **Logging** | `@Slf4j`; `log.info` success/flow, `warn` business/security oddities, `error` failures, `debug` verbose (tokens, payloads) |
-| **CORS** | `http://localhost:3000` on controllers + `SecurityConfig` |
-| **Validation** | `spring-boot-starter-validation` on classpath; **no `@Valid` on controller parameters** in current code — validate in service or add later |
-| **CrossOrigin** | Present on REST controllers that serve the SPA |
-| **i18n** | User-facing API copy mixed EN/FR in emails and some messages; code identifiers in English |
-| **Secrets** | `.gitignore` excludes `.env` and `**/.env` |
-
----
-
-## 15. Tests
-
-- `CareerTransitionPlatformApplicationTests` — `@SpringBootTest`, `contextLoads()` only.  
-- Test `application.properties`: H2, `springdotenv.enabled=false`, dummy AI/mail/minio keys, **`mail.imap.polling.enabled=false`**.
-
----
-
-## 16. Useful commands
-
-From `backend/career-transition-platform`:
-
-```bash
-./mvnw test
-./mvnw spring-boot:run
-```
-
-(Windows: `mvnw.cmd`.)
-
----
-
-*Generated from the codebase structure and source files in this repository. Update this file when adding packages, endpoints, or env vars.*
+*Généré pour refléter le dépôt tel qu’exploré ; mettre à jour lors de changements majeurs (nouveaux endpoints, infra, pages frontend).*

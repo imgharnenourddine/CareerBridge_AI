@@ -28,11 +28,15 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/interview")
-@CrossOrigin(origins = "http://localhost:3000")
+@CrossOrigin(origins = {"http://localhost:3000", "http://localhost:5173"})
 @RequiredArgsConstructor
 @Slf4j
 public class InterviewController {
@@ -105,16 +109,32 @@ public class InterviewController {
 	@GetMapping("/current")
 	public ResponseEntity<InterviewCurrentResponse> currentInterview() {
 		User user = currentUser();
-		log.info("GET /api/interview/current email={} interviewId=-", user.getEmail());
-		Interview in = interviewService.getCurrentIncompleteInterview(user.getId());
-		if (in == null) {
-			return ResponseEntity.ok(InterviewCurrentResponse.builder().interviewId(null).startedAt(null).build());
+		// Latest interview by createdAt DESC (any status) — Messages uses this for the most recent session id
+		InterviewCurrentResponse body = interviewService.getCurrentInterview(user.getId());
+		log.info("GET /api/interview/current email={} interviewId={}", user.getEmail(), body.getInterviewId());
+		return ResponseEntity.ok(body);
+	}
+
+	/**
+	 * Completed interviews for the user, newest completion first — used to list separate post-interview conversations.
+	 */
+	@GetMapping("/completed")
+	public ResponseEntity<List<Map<String, Object>>> completedInterviews() {
+		User user = currentUser();
+		List<Interview> all = interviewRepository.findByUser_IdOrderByCreatedAtDesc(user.getId());
+		List<Interview> completed = all.stream()
+				.filter(i -> i.getCompletedAt() != null)
+				.sorted(Comparator.comparing(Interview::getCompletedAt).reversed())
+				.toList();
+		List<Map<String, Object>> out = new ArrayList<>(completed.size());
+		for (Interview iv : completed) {
+			Map<String, Object> row = new LinkedHashMap<>();
+			row.put("interviewId", iv.getId());
+			row.put("completedAt", iv.getCompletedAt());
+			out.add(row);
 		}
-		log.info("GET /api/interview/current email={} interviewId={}", user.getEmail(), in.getId());
-		return ResponseEntity.ok(InterviewCurrentResponse.builder()
-				.interviewId(in.getId())
-				.startedAt(in.getStartedAt())
-				.build());
+		log.info("GET /api/interview/completed email={} count={}", user.getEmail(), out.size());
+		return ResponseEntity.ok(out);
 	}
 
 	@PostMapping("/{interviewId}/complete")
