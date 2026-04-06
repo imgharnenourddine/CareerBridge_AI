@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   changePassword, getCurrentInterview, getDashboardStats,
-  getPostInterviewMessages, getProfile, getProfilePhoto,
+  getPostInterviewMessages, getProfile,
   updateProfile, uploadProfilePhoto,
 } from '../api/api'
 import { useAuth } from '../context/AuthContext'
@@ -78,7 +78,6 @@ export default function DashboardPage() {
   const [recentMessages, setRecentMessages] = useState([])
   const [photoKey, setPhotoKey] = useState(0)
   const [photoTimestamp, setPhotoTimestamp] = useState(0)
-  const [photoUrl, setPhotoUrl] = useState(null)
   const [photoUploading, setPhotoUploading] = useState(false)
   const [photoSuccess, setPhotoSuccess] = useState('')
   const [photoError, setPhotoError] = useState('')
@@ -107,21 +106,6 @@ export default function DashboardPage() {
     load()
     return () => { cancelled = true }
   }, [])
-
-  const loadProfilePhoto = useCallback(async () => {
-    if (!profile?.imagePath) { setPhotoUrl(p => { if (p) URL.revokeObjectURL(p); return null }); return }
-    try {
-      const res = await getProfilePhoto()
-      const blob = new Blob([res.data], { type: res.headers['content-type'] || 'image/jpeg' })
-      const url = URL.createObjectURL(blob)
-      setPhotoUrl(p => { if (p) URL.revokeObjectURL(p); return url })
-    } catch { setPhotoUrl(p => { if (p) URL.revokeObjectURL(p); return null }) }
-  }, [profile?.imagePath])
-
-  useEffect(() => {
-    if (!profile?.imagePath) { setPhotoUrl(p => { if (p) URL.revokeObjectURL(p); return null }); return }
-    loadProfilePhoto()
-  }, [profile?.imagePath, photoTimestamp, loadProfilePhoto])
 
   async function handleSave(e) {
     e.preventDefault(); setFormMessage(''); setFormError(''); setSaving(true)
@@ -211,7 +195,7 @@ export default function DashboardPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
             <div className="dp-nd" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <span style={{ fontSize: '0.875rem', fontWeight: 600, fontFamily: F }}>{navUsername}</span>
-              <UserAvatar firstName={profile?.firstName ?? firstName} lastName={profile?.lastName ?? lastName} imagePath={profile?.imagePath ?? null} refreshKey={photoTimestamp} imgClassName="border-2 border-neon bg-gray-800 object-cover" />
+              <UserAvatar firstName={profile?.firstName ?? firstName} lastName={profile?.lastName ?? lastName} imagePath={profile?.imagePath || '/default-avatar.png'} refreshKey={photoTimestamp} imgClassName="border-2 border-neon bg-gray-800 object-cover" />
             </div>
             <button type="button" onClick={() => logout()} className="dp-logout" style={{ fontSize: '0.875rem', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.1em', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 0.2s', fontFamily: F }}>Logout</button>
           </div>
@@ -227,13 +211,7 @@ export default function DashboardPage() {
               {/* PHOTO */}
               <div style={{ position: 'relative', cursor: 'pointer', marginBottom: '1rem' }}>
                 <label htmlFor={`profile-upload-${photoKey}`} className="dp-photo-label" style={{ cursor: 'pointer', position: 'relative', display: 'block', borderRadius: '9999px', overflow: 'hidden', border: `4px solid ${NE}`, boxShadow: `0 0 15px rgba(255,0,85,0.4)`, backgroundColor: '#1f2937', opacity: photoUploading ? 0.6 : 1, pointerEvents: photoUploading ? 'none' : 'auto' }}>
-                  {photoUrl ? (
-                    <img src={photoUrl} alt={displayName} className="dp-photo-img" style={{ width: '7rem', height: '7rem', objectFit: 'cover', transition: 'opacity 0.3s' }} />
-                  ) : (
-                    <div className="dp-photo-img" style={{ width: '7rem', height: '7rem', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#1f2937', transition: 'opacity 0.3s' }}>
-                      <span style={{ fontSize: '1.875rem', fontWeight: 900, color: '#fff' }}>{(profile?.firstName?.[0] || '').toUpperCase()}{(profile?.lastName?.[0] || '').toUpperCase()}</span>
-                    </div>
-                  )}
+                  <img src={profile?.imagePath || '/default-avatar.png'} alt={displayName} className="dp-photo-img" style={{ width: '7rem', height: '7rem', objectFit: 'cover', transition: 'opacity 0.3s' }} />
                   <div className="dp-photo-overlay" style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0, transition: 'opacity 0.3s', background: 'rgba(0,0,0,0.4)' }}>
                     <span style={{ fontSize: '0.75rem', fontWeight: 900, color: NE, textTransform: 'uppercase', letterSpacing: '0.1em', padding: '0.25rem 0.5rem' }}>Update</span>
                   </div>

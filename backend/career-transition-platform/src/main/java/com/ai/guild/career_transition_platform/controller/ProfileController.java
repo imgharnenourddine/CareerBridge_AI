@@ -6,10 +6,8 @@ import com.ai.guild.career_transition_platform.dto.UpdateProfileRequest;
 import com.ai.guild.career_transition_platform.entity.User;
 import com.ai.guild.career_transition_platform.repository.UserRepository;
 import com.ai.guild.career_transition_platform.service.ProfileService;
-import com.ai.guild.career_transition_platform.service.ProfileService.ProfilePhotoContent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -61,24 +59,6 @@ public class ProfileController {
 		User user = currentUser();
 		log.info("POST /api/profile/photo email={}", user.getEmail());
 		return ResponseEntity.ok(profileService.uploadProfilePhoto(user.getId(), file));
-	}
-
-	@GetMapping("/photo")
-	public ResponseEntity<byte[]> getPhoto() {
-		User user = currentUser();
-		log.info("GET /api/profile/photo email={}", user.getEmail());
-		return profileService.getProfilePhoto(user.getId())
-				.map(this::toImageResponse)
-				.orElse(ResponseEntity.notFound().build());
-	}
-
-	private ResponseEntity<byte[]> toImageResponse(ProfilePhotoContent content) {
-		return ResponseEntity.ok()
-				.header(HttpHeaders.CONTENT_TYPE, content.contentType())
-				.header(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, must-revalidate")
-				.header(HttpHeaders.PRAGMA, "no-cache")
-				.header(HttpHeaders.EXPIRES, "0")
-				.body(content.data());
 	}
 
 	private User currentUser() {

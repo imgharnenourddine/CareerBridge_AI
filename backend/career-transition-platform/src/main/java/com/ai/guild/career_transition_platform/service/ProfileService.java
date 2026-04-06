@@ -6,22 +6,18 @@ import com.ai.guild.career_transition_platform.dto.UpdateProfileRequest;
 import com.ai.guild.career_transition_platform.entity.User;
 import com.ai.guild.career_transition_platform.exception.InvalidPasswordException;
 import com.ai.guild.career_transition_platform.repository.UserRepository;
-import io.minio.GetObjectArgs;
-import io.minio.MinioClient;
-import io.minio.PutObjectArgs;
-import io.minio.RemoveObjectArgs;
+import com.cloudinary.Cloudinary;
+import com.cloudinary.utils.ObjectUtils;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.InputStream;
-import java.util.Locale;
-import java.util.Optional;
+import java.io.IOException;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -30,10 +26,7 @@ public class ProfileService {
 
 	private final UserRepository userRepository;
 	private final PasswordEncoder passwordEncoder;
-	private final MinioClient minioClient;
-
-	@Value("${minio.bucket-name}")
-	private String bucketName;
+	private final Cloudinary cloudinary;
 
 	@Transactional(readOnly = true)
 	public ProfileResponse getProfile(Long userId) {
@@ -83,87 +76,37 @@ public class ProfileService {
 					return new EntityNotFoundException("User not found");
 				});
 
-		String ext = resolveExtension(file.getOriginalFilename());
-		String objectName = "profile_" + userId + "_" + System.currentTimeMillis() + "." + ext;
-
 		if (user.getImagePath() != null && !user.getImagePath().isBlank()) {
 			try {
-				minioClient.removeObject(
-						RemoveObjectArgs.builder().bucket(bucketName).object(user.getImagePath()).build());
+				cloudinary.uploader().destroy(
+						"profiles/user_" + userId,
+						ObjectUtils.asMap("resource_type", "image")
+				);
 				log.debug("Removed previous profile object key={}", user.getImagePath());
 			} catch (Exception e) {
 				log.warn("Could not remove previous profile object: {}", e.getMessage());
 			}
 		}
 
-		try (InputStream inputStream = file.getInputStream()) {
-			String contentType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";
-			minioClient.putObject(
-					PutObjectArgs.builder()
-							.bucket(bucketName)
-							.object(objectName)
-							.stream(inputStream, file.getSize(), -1)
-							.contentType(contentType)
-							.build());
-		} catch (Exception e) {
+		try {
+			Map uploadResult = cloudinary.uploader().upload(
+					file.getBytes(),
+					ObjectUtils.asMap(
+							"folder", "profiles",
+							"public_id", "user_" + userId,
+							"overwrite", true,
+							"resource_type", "image"
+					)
+			);
+			String url = (String) uploadResult.get("secure_url");
+			user.setImagePath(url);
+			User saved = userRepository.save(user);
+			log.info("Profile photo uploaded for userId={} objectKey={}", userId, url);
+			return toProfileResponse(saved);
+		} catch (IOException e) {
 			log.error("MinIO upload failed for userId={}: {}", userId, e.getMessage(), e);
 			throw new IllegalStateException("Failed to upload profile photo", e);
 		}
-
-		user.setImagePath(objectName);
-		User saved = userRepository.save(user);
-		log.info("Profile photo uploaded for userId={} objectKey={}", userId, objectName);
-		return toProfileResponse(saved);
-	}
-
-	@Transactional(readOnly = true)
-	public Optional<ProfilePhotoContent> getProfilePhoto(Long userId) {
-		User user = userRepository.findById(userId)
-				.orElseThrow(() -> {
-					log.warn("Photo download: user not found userId={}", userId);
-					return new EntityNotFoundException("User not found");
-				});
-		if (user.getImagePath() == null || user.getImagePath().isBlank()) {
-			log.debug("No profile photo stored for userId={}", userId);
-			return Optional.empty();
-		}
-		try (InputStream stream = minioClient.getObject(
-				GetObjectArgs.builder()
-						.bucket(bucketName)
-						.object(user.getImagePath())
-						.build())) {
-			byte[] bytes = stream.readAllBytes();
-			String contentType = guessImageContentType(user.getImagePath());
-			log.debug("Profile photo loaded from MinIO userId={} bytes={} contentType={}", userId, bytes.length, contentType);
-			return Optional.of(new ProfilePhotoContent(bytes, contentType));
-		} catch (Exception e) {
-			log.error("MinIO getObject failed for userId={}: {}", userId, e.getMessage(), e);
-			throw new IllegalStateException("Failed to load profile photo", e);
-		}
-	}
-
-	private static String resolveExtension(String originalFilename) {
-		if (originalFilename == null || !originalFilename.contains(".")) {
-			return "jpg";
-		}
-		return originalFilename.substring(originalFilename.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
-	}
-
-	private static String guessImageContentType(String objectKey) {
-		String lower = objectKey.toLowerCase(Locale.ROOT);
-		if (lower.endsWith(".png")) {
-			return "image/png";
-		}
-		if (lower.endsWith(".gif")) {
-			return "image/gif";
-		}
-		if (lower.endsWith(".webp")) {
-			return "image/webp";
-		}
-		if (lower.endsWith(".svg")) {
-			return "image/svg+xml";
-		}
-		return "image/jpeg";
 	}
 
 	private static ProfileResponse toProfileResponse(User user) {
@@ -174,8 +117,5 @@ public class ProfileService {
 				.lastName(user.getLastName())
 				.imagePath(user.getImagePath())
 				.build();
-	}
-
-	public record ProfilePhotoContent(byte[] data, String contentType) {
 	}
 }

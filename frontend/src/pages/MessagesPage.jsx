@@ -3,8 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
 	getPostInterviewMessages,
-	getProfile,
-	getProfilePhoto,
 	sendUserChoice,
 	startPostInterview,
 } from '../api/api'
@@ -222,8 +220,6 @@ export default function MessagesPage() {
 	const botCountAtChoice = useRef(0)
 
 	const [optimisticUserTexts, setOptimisticUserTexts] = useState([])
-	const [photoUrl, setPhotoUrl] = useState(null)
-	const [profileImagePath, setProfileImagePath] = useState(null)
 
 	const scrollToBottom = useCallback(() => {
 		messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -259,54 +255,6 @@ export default function MessagesPage() {
 			cancelled = true
 		}
 	}, [initKey])
-
-	useEffect(() => {
-		let cancelled = false
-		getProfile()
-			.then((r) => {
-				if (!cancelled) setProfileImagePath(r.data?.imagePath ?? null)
-			})
-			.catch(() => {
-				if (!cancelled) setProfileImagePath(null)
-			})
-		return () => {
-			cancelled = true
-		}
-	}, [])
-
-	const imagePathForPhoto = user?.imagePath ?? profileImagePath
-
-	useEffect(() => {
-		let cancelled = false
-		async function loadPhoto() {
-			try {
-				if (imagePathForPhoto) {
-					const res = await getProfilePhoto()
-					if (cancelled) return
-					const blob = new Blob([res.data], { type: res.headers['content-type'] || 'image/jpeg' })
-					const next = URL.createObjectURL(blob)
-					setPhotoUrl((prev) => {
-						if (prev) URL.revokeObjectURL(prev)
-						return next
-					})
-				} else {
-					setPhotoUrl((prev) => {
-						if (prev) URL.revokeObjectURL(prev)
-						return null
-					})
-				}
-			} catch {
-				setPhotoUrl((prev) => {
-					if (prev) URL.revokeObjectURL(prev)
-					return null
-				})
-			}
-		}
-		loadPhoto()
-		return () => {
-			cancelled = true
-		}
-	}, [imagePathForPhoto])
 
 	useEffect(() => {
 		if (interviewId == null) return
@@ -483,6 +431,7 @@ export default function MessagesPage() {
 	const navUsername = user
 		? `${(user.firstName?.[0] || '').toUpperCase()}.${(user.lastName || '').toUpperCase()}`
 		: ''
+	const imagePathForPhoto = user?.imagePath || '/default-avatar.png'
 
 	const shellNav = (
 		<nav className="glass-panel fixed top-0 left-0 z-50 flex h-[72px] w-full items-center justify-between border-b border-white/5 px-8 py-4">
@@ -502,9 +451,9 @@ export default function MessagesPage() {
 			<div className="flex items-center gap-6">
 				<div className="hidden items-center gap-3 md:flex">
 					<span className="text-sm font-semibold">{navUsername}</span>
-					{photoUrl ? (
+					{user?.imagePath ? (
 						<img
-							src={photoUrl}
+							src={imagePathForPhoto}
 							alt="Profile"
 							className="w-10 h-10 rounded-full object-cover border-2 border-[#FF0055] shadow-[0_0_10px_rgba(255,0,85,0.4)]"
 						/>
